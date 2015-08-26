@@ -452,115 +452,19 @@ A $point is a 2-part structure x,y coordinate pair held as an array
 reference. A @point is considered an unordered collection. $points is
 the preferred name for a reference to @point.
 
-A $unit is a 4-part structure that contains x, y, angle, and length. A
-@unit is considered an unorderd collection and $units is the preferred
-name for a reference of @unit.
+A $unit is a 4-part structure that contains x, y, angle, and length. The
+x,y point is considered the MIDDLE of the unit with a head and tail
+extending in opposite directions. The angle is the direction of the
+HEAD. A @unit is considered an unorderd collection and $units is the
+preferred name for a reference of @unit.
 
-
-
----
-
-1. Create histogram of values in the area 'ahead'
-2. Determine a threshold for vein-ness
-3. Find the next best unit
-4. Decide if it's good enough to be a vein
-5. Decide if it fits in the graph
-
-
-
-A 'surface' is a collection of 'minis' stored in a 2-dimensional hash
+A $surface' is a collection of $unit stored in a 2-dimensional hash
 reference in which the x and y coordinates are the hash keys. This
-prevents any two 'minis' from colliding.
+prevents unit collision on the surface.
 
-A 'graph' is an array of 'surfaces' whose indices correspond to
-different image resolutions.
+A $graph is an array of $surface whose indices correspond to different
+image resolutions.
 
-An 'image' is an array of Imager objects indexed identically to a
-'graph'. The highest resolution image is at index 0.
+An $image is an array of Imager objects indexed identically to a
+$graph. The highest resolution image is at index 0.
 
-# Functions #
-
-coordinate(x, y, r) returns the x,y coordinates of an image at
-resolution r. One never interacts directly with the Imager object, but
-rather through the coordinate() function.
-
-collides(mini1, mini2) returns true if mini1 and mini2 overlap.
-
-fetch(x, y, r) returns all of the minis for coordiantes x, y
-
-
-
-## Graph ##
-
-
-for (my $x = 0; $x <= 4; $x++) {
-	for (my $y = 0; $y <= 4; $y++) {
-		my $dx = $x - 2;
-		my $dy = $y - 2;
-		my $angle = int(0.5 + atan2($dy, $dx) * 180 / 3.1415926);
-		print "$x,$y $dx $dy $angle\n";
-	}
-}
-
-die "test";
-
-
-
-sub points_on_band {
-	my ($unit, $length, $width) = @_;
-	my ($x0, $y0, $a0) = @$unit;
-	
-	my $rad = 2 * 3.14159 * $a0 / 360;
-	my $x1 = $x0 + cos($rad) * $length;
-	my $y1 = $y0 + sin($rad) * $length;
-	
-	my $angle = ($x0, $y0, $x1, $y1);
-			
-	# angle between points 0 and 1
-#	my $dx = $x1 - $x0;
-#	my $dy = $y1 - $y0;
-#	my $angle = atan2($dy, $dx);
-
-	# get all points on the midline
-	my $points = points_on_line($x0, $y0, $x1, $y1);
-	return $points if $width == 1;
-	
-	my %group; # to remove possible duplicates
-	foreach my $point (@$points) {
-		my ($x, $y) = @$point;
-		my ($px0, $py0, $px1, $py1) = _perps($x, $y, $angle, $width);
-		my $line = points_on_line($px0, $py0, $px1, $py1);
-		foreach my $p (@$line) {
-			$group{"$p->[0],$p->[1]"} = 1;
-		}
-	}
-	
-	my @point;
-	foreach my $string (keys %group) {
-		my ($x, $y) = split(",", $string);
-		push @point, [$x, $y];
-	}
-
-	return \@point;
-}
-
-sub threshold {
-	my ($img, $unit, $length, $width) = @_;
-
-	my $points = points_on_band($unit, $length, $width);	
-	my @val;
-	foreach my $point (@$points) {
-		my ($x, $y) = @$point;
-		my ($val) = $img->getpixel('x' => $x, 'y' => $y)->rgba;
-		push @val, $val;
-	}
-	
-	@val = sort {$a <=> $b} @val;
-	my $t = $val[@val / 4]; # currently hard-coded as 1st quartile
-	
-	return $t;
-}
-
-A 'band' is a 5-part structure that appends a width to a 'unit'. A
-'band' is therefore a rectangular selection of points. Again, @band and
-$bands are the preferred names, and the collections are unordered.
