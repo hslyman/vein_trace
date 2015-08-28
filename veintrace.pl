@@ -55,13 +55,13 @@ print STDERR "done\n";
 my $s0 = 10; # 10 degrees per step for origin
 my $h0 = 15; # 15 pixel head length
 my $t0 =  5; # 5 pixel tail length
-my $g0 = 16; # 16 pixel image gutter
+my $g0 = 6; # 16 pixel image gutter
 my $origin = find_origin($IMAGE[$RES_0], $s0, $h0, $t0, $g0);
 
 ## Trace Main Vein ##
 my $a1 = 20; # arc degrees
 my $s1 = 5;  # degrees per step
-my $h1 = 5; # head length
+my $h1 = 10; # head length
 my $t1 = 5; # tail length
 
 my @primary;
@@ -197,51 +197,67 @@ sub points_on_line {
 	$x1 = int($x1 + 0.5);
 	$y1 = int($y1 + 0.5);
 	
-	my %point; # non-redundant collection of all points on the line
+	my @point; # non-redundant points on the line
 	
-	# check for vertical lines first
 	my $score = 0;
-	if ($x0 == $x1) {
-		my @point;
-		($y0, $y1) = ($y1, $y0) if $y0 > $y1;
-		for (my $y = $y0; $y <= $y1; $y++) {
-			push @point, [$x0, $y];
+	if ($x0 == $x1) { # check for vertical lines first
+		if ($y0 == $y1) {
+			push @point, [$x0, $y0];
+		} elsif ($y0 < $y1) {
+			for (my $y = $y0; $y <= $y1; $y++) {
+				push @point, [$x0, $y];
+			}
+		} else {
+			for (my $y = $y0; $y >= $y1; $y--) {
+				push @point, [$x0, $y];
+			}	
 		}
-		return \@point;	
+	} else { # Bresenham's algorithm for line tracing
+		my %check;
+		my $dx = $x1 - $x0;
+		my $dy = $y1 - $y0;
+		my $error = 0;
+		my $derror = abs($dy/$dx);
+		my $y = $y0;
+		
+		if ($x0 < $x1) {
+			for (my $x = $x0; $x <= $x1; $x++) {
+				if (not defined $check{"$x,$y"}) {
+					$check{"$x,$y"} = 1;
+					push @point, [$x, $y];
+				}
+				$error += $derror;
+				while ($error >= 0.5) {
+					last if $x == $x1 and $y == $y1;
+					if (not defined $check{"$x,$y"}) {
+						$check{"$x,$y"} = 1;
+						push @point, [$x, $y];
+					}
+					$y += $y1 > $y0 ? +1 : -1;
+					$error -= 1.0;
+				}
+			}
+		} else {
+			for (my $x = $x0; $x >= $x1; $x--) {
+				if (not defined $check{"$x,$y"}) {
+					push @point, [$x, $y];
+					$check{"$x,$y"} = 1;
+				}
+				$error += $derror;
+				while ($error >= 0.5) {
+					last if $x == $x1 and $y == $y1;
+					if (not defined $check{"$x,$y"}) {
+						push @point, [$x, $y];
+						$check{"$x,$y"} = 1;
+					}
+					$y += $y1 > $y0 ? +1 : -1;
+					$error -= 1.0;
+				}
+			}
+		}
 	}
 	
-	# swap coordinates for 'left' side of graph
-	if ($x0 > $x1) {
-		($x0, $x1) = ($x1, $x0);
-		($y0, $y1) = ($y1, $y0);
-	}
-
-	# Bresenham's algorithm for line tracing
-	my $dx = $x1 - $x0;
-	my $dy = $y1 - $y0;
-	my $error = 0;
-	my $derror = abs($dy/$dx);
-	my $y = $y0;
-	for (my $x = $x0; $x <= $x1; $x++) {
-		$point{"$x,$y"} = 1;
-		$error += $derror;
-		while ($error >= 0.5) {
-			last if $x == $x1 and $y == $y1;
-			$point{"$x,$y"} = 1;
-			$y += $y1 > $y0 ? +1 : -1;
-			$error -= 1.0;
-		}
-	}
-	
-	delete $point{"$x0,$y0"} if defined $mode and $mode eq '-ori';
-		
-	# return as array of (x,y) pairs
-	my @point;
-	foreach my $point (keys %point) {
-		my ($x, $y) = split(",", $point);
-		push @point, [$x, $y];
-	}
-		
+	shift @point if defined $mode and $mode eq '-ori';
 	return \@point;
 }
 
@@ -286,7 +302,7 @@ sub next_unit {
 }
 
 sub threshold {
-	return 220; # temporary
+	return 150; # temporary
 
 
 	my ($img, $unit, $arc, $step) = @_;
@@ -379,15 +395,12 @@ sub score_unit {
 	my ($img, $unit) = @_;
 	
 	my $sum = 0;
-	my $points = points_in_unit($unit);
-#	my @sum;
+	my $points = points_in_head($unit);
 	foreach my $point (@$points) {
 		my ($x, $y) = @$point;
 		my ($val) = $img->getpixel('x' => $x, 'y' => $y)->rgba;
 		$sum += $val;
-#		push @sum, $val;
 	}
-#	print "\t@sum\n";
 	
 	return int $sum / @$points;
 }
