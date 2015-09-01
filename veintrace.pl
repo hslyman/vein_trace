@@ -4,78 +4,63 @@ use warnings 'FATAL' => 'all';
 use Imager;
 use DataBrowser;
 use Getopt::Std;
-use vars qw($opt_s $opt_r $opt_0 $opt_1 $opt_2 $opt_3 $opt_t);
-getopts('s:r:0:1:2:3:t');
+use vars qw($opt_t);
+getopts('t');
 
 ## GLOBALS ##
 
-my $SCALE   = 3;
-my $MAX_RES = 3;
-my $RES_0   = 3;
-my $RES_1   = 2;
-my $RES_2   = 1;
-my $RES_3   = 0;
-my $TEST    = 0;
+my $SCALE = 3;
+my $MAXRES = 1;
 
 ## Command Line ##
 
 die "
 usage: veintrace.pl [options] <image_file>
   -s <int>    scale [$SCALE]
-  -r <int>    maximum resolution [$MAX_RES]
-  -0 <int>    origin resolution [$RES_0]
-  -1 <int>    primary vein resolution [$RES_1]
-  -2 <int>    secondary vein resolution [$RES_2]
-  -3 <int>    tertiary vein resolution [$RES_3]
   -t          test mode
 " unless @ARGV == 1;
 my ($bmp) = @ARGV;
 
-$SCALE   = $opt_s if $opt_s;
-$MAX_RES = $opt_r if $opt_r;
-$RES_0   = $opt_0 if $opt_0;
-$RES_1   = $opt_1 if $opt_1;
-$RES_2   = $opt_2 if $opt_2;
-$RES_3   = $opt_3 if $opt_3;
-$TEST    = $opt_t if $opt_t;
-
 ## Read bmp and save in several reduced resolutions ##
 
 print STDERR "reading";
-my @IMAGE;
-$IMAGE[0] = Imager->new;
-$IMAGE[0]->read(file => $bmp) or die "Cannot read $bmp: ", Imager->errstr;
-for (my $i = 1; $i <= $MAX_RES; $i++) {
+my @img;
+$img[$MAXRES] = Imager->new;
+$img[$MAXRES]->read(file => $bmp) or die "Cannot read $bmp: ", Imager->errstr;
+for (my $i = $MAXRES-1; $i >= 0; $i--) {
 	print STDERR ".";
-	$IMAGE[$i] = $IMAGE[$i-1]->scale(scalefactor => 1/$SCALE);
+	$img[$i] = $img[$i+1]->scale(scalefactor => 1/$SCALE);
 }
 print STDERR "done\n";
 
 ## Find Origin ##
-my $s0 = 10; # 10 degrees per step for origin
-my $h0 = 15; # 15 pixel head length
-my $t0 =  5; # 5 pixel tail length
-my $g0 = 6; # 16 pixel image gutter
-my $origin = find_origin($IMAGE[$RES_0], $s0, $h0, $t0, $g0);
+my $s0 = 10; # degrees per step for origin
+my $h0 = 8; # head length
+my $t0 =  4; # tail length
+my $g0 = 11; # image gutter
+my $origin = find_origin($img[0], $s0, $h0, $t0, $g0);
 
 ## Trace Main Vein ##
 my $a1 = 20; # arc degrees
 my $s1 = 5;  # degrees per step
-my $h1 = 10; # head length
+my $h1 = 5; # head length
 my $t1 = 5; # tail length
 
 my @primary;
 my $unit = $origin;
 my $count = 0;
 my %seen;
-#print STDERR "tracing primary vein";
+print STDERR "tracing primary vein";
+my $primary_score = 0;
 while (1) {
-#	print STDERR ".";
-	my $t = threshold($IMAGE[$RES_0], $unit, $a1, $s1);
-	my ($next, $score) = next_unit($IMAGE[$RES_0], $unit, $a1, $h1, $t1, $s1);
+	print STDERR ".";
+	my $t = threshold($img[0], $unit, $a1, $s1);
+	my ($next, $score) = next_unit($img[0], $unit, $a1, $h1, $t1, $s1);
+	
 		
 	if ($score < $t) {
 		my $s = "$next->[0],$next->[1]";
+		$primary_score += $score;
 		if ($seen{$s}) {
 			warn "endless loop at $s $next->[2]°\n";
 			last;
@@ -89,37 +74,33 @@ while (1) {
 		last;
 	}	
 }
-#print STDERR "\n";
+print STDERR "\n";
 
 ###################
 # Testing Section #
 ###################
 
-if ($TEST) {
+if ($opt_t) {
 
 	# origin
-	my $i0 = $IMAGE[$RES_0]->copy();
-	my ($x0, $y0, $a0, $h0, $t0) = @$origin;
-	$i0->circle(color => 'green', 'x'=>$x0, 'y'=>$y0, 'r'=>3);
-	my ($x1, $y1) = @{head($origin)};
-	my $points = points_on_line($x0, $y0, $x1, $y1);
-	foreach my $point (@$points) {
-		my ($x, $y) = @$point;
-		$i0->setpixel('x'=>$x, 'y'=>$y, color=>'red');
-	}		
+	my $i0 = $img[0]->copy();
+	plot_unit($i0, $origin);		
 	$i0->write(file=>"origin.png") or die Imager->errstr;	
 		
 	# primary vein	
-	my $i1 = $IMAGE[$RES_0]->copy();
+	my $i1 = $img[0]->copy();
 	foreach my $unit (@primary) {
 		my ($x, $y) = @$unit;
 		$i1->setpixel('x'=>$x, 'y'=>$y, color=>'red');
 	}
 	$i1->write(file=>"primary.png") or die Imager->errstr;
-
+	
+	exit;
+	
+	
 	# all paths on the primary vein	
 	for (my $i = 0; $i < @primary; $i++) {
-		my $img = $IMAGE[$RES_0]->copy();
+		my $img = $img[0]->copy();
 		plot_unit($img, $primary[$i]);
 		my $n = '0' x (3 - length($i));
 		my $name = "primary-$n$i.png";
@@ -261,42 +242,73 @@ sub points_on_line {
 	return \@point;
 }
 
+sub distance {
+	my ($x0, $y0, $x1, $y1) = @_;
+	return sqrt(($x0-$x1)**2 + ($y0-$y1)**2);
+}
+
 sub next_unit {
+	my ($img, $ori, $arc, $hlen, $tlen, $step) = @_;
+
+	# find the 3 starting positions
+	my ($x0, $y0, $a0) = @$ori;
+	my ($x1, $y1) = @{head($ori)};
+	my $d0 = distance($x0, $y0, $x1, $y1);
+	my @start; # 3 possible starts
+	for (my $i = -1; $i <= 1; $i++) {
+		for (my $j = -1; $j <= 1; $j++) {
+			next if $i == 0 and $j == 0;
+			my $x = $x0 + $i;
+			my $y = $y0 + $j;
+			my $d = distance($x, $y, $x1, $y1);
+			push @start, [$x, $y] if $d < $d0;
+		}
+	}
+	
+	# find optimal (x, y, angle) for each start
+	my $aMin = $a0 - $arc;
+	my $aMax = $a0 + $arc;
+	my $min_score = 1e30;
+	my $opt_unit;
+	foreach my $start (@start) {
+		my ($nx0, $ny0, $nx1, $ny1, $na0);
+		for (my $angle = $aMin; $angle <= $aMax; $angle += $step) {
+			my $unit = [@$start, $angle, $hlen, $tlen];
+			my $score = score_unit($img, $unit);
+			if ($score < $min_score) {
+				$min_score = $score;
+				$opt_unit = $unit;
+			}
+		}
+	}
+		
+	return $opt_unit, $min_score;
+}
+
+sub next_unit_old {
 	my ($img, $ori, $arc, $hlen, $tlen, $step) = @_;
 
 	my ($x0, $y0, $a0) = @$ori;
 	my $aMin = $a0 - $arc;
 	my $aMax = $a0 + $arc;
 	
-	# find optimal angle from here
-	print "angle in $a0\n";
+	# find optimal (x, y, angle) from here
 	my $min_score = 1e30;
-	my $opt_angle;
+	my ($nx0, $ny0, $nx1, $ny1, $na0);
 	for (my $angle = $aMin; $angle <= $aMax; $angle += $step) {
 		my $unit = [$x0, $y0, $angle, $hlen, $tlen];
 		my $score = score_unit($img, $unit);
-		print "\t$angle° $score\n";
 		if ($score < $min_score) {
 			$min_score = $score;
-			$opt_angle = $angle;
+			my $points = points_in_head($unit);
+			my $first = shift @$points;
+			my $last = pop @$points;
+			($nx0, $ny0) = @$first;
+			($nx1, $ny1) = @$last;
+			$na0 = angle($nx0, $ny0, $nx1, $ny1);
 		}
 	}
-	print "angle out $opt_angle, score $min_score\n";
-	
-	# find nearest pixel on line
-	my $best = [$x0, $y0, $opt_angle, $hlen, $tlen];
-	my $points = points_in_head($best);
-	my ($next_x, $next_y);
-	foreach my $point (@$points) {
-		my ($x1, $y1) = @$point;
-		next if $x1 == $x0 and $y1 == $y0;
-		next if abs($x0 - $x1) > 1 or abs($y0 - $y1) > 1;
-		$next_x = $x1;
-		$next_y = $y1;
-	}
-	
-	my $next_unit = [$next_x, $next_y, $opt_angle, $hlen, $tlen];
-	print_unit($next_unit);
+	my $next_unit = [$nx0, $ny0, $na0, $hlen, $tlen];
 	
 	return $next_unit, $min_score;
 }
@@ -352,8 +364,7 @@ sub find_origin {
 		splice(@blob, $ORIGINS);
 	}
 			
-	# identify origin as dark line & light line opposite
-	# with a path leading to the long side of the image
+	# identify origin as unit & following white-space
 	my ($cx, $cy) = ($xlimit/2, $ylimit/2); # center of image
 	my $origin;
 	my $min_score = 1e30;
@@ -366,21 +377,13 @@ sub find_origin {
 		
 		for (my $angle = $a1; $angle < $a2; $angle += $step) {
 			my $unit = [$x0, $y0, $angle, $hlen, $tlen];
-			my $head = head($unit);
 			my $tail = tail($unit);
-			my $p1 = points_on_line($x0, $y0, @$head);
-			my $p2 = points_on_line($x0, $y0, @$tail, '-ori');
-			my $score;
-			foreach my $p (@$p1) {
-				my ($x, $y) = @$p;
-				my ($val) = $img->getpixel('x' => $x, 'y' => $y)->rgba;
-				$score += $val;
-			}
-			foreach my $p (@$p2) {
-				my ($x, $y) = @$p;
-				my ($val) = $img->getpixel('x' => $x, 'y' => $y)->rgba;
-				$score -= $val;
-			}
+			my ($tx, $ty) = @$tail;
+			my $anti = [$tx, $ty, $angle+180, $tlen, 0];
+			my $uscore = score_unit($img, $unit);
+			my $ascore = score_unit($img, $anti);
+			my $score = $uscore - $ascore;
+			
 			if ($score < $min_score) {
 				$origin = [$x0, $y0, $angle, $hlen, $tlen];
 				$min_score = $score;
@@ -395,13 +398,12 @@ sub score_unit {
 	my ($img, $unit) = @_;
 	
 	my $sum = 0;
-	my $points = points_in_head($unit);
+	my $points = points_in_unit($unit);
 	foreach my $point (@$points) {
 		my ($x, $y) = @$point;
 		my ($val) = $img->getpixel('x' => $x, 'y' => $y)->rgba;
 		$sum += $val;
 	}
-	
 	return int $sum / @$points;
 }
 
@@ -417,12 +419,13 @@ sub plot_unit {
 		my ($x, $y) = @$point;
 		$img->setpixel('x'=>$x, 'y'=>$y, color=>'red');
 	}
-	$img->setpixel('x'=>$unit->[0], 'y'=>$unit->[1], color=>'blue');
+	$img->setpixel('x'=>$unit->[0], 'y'=>$unit->[1], color=>'yellow');
 }
 
 sub print_unit {
-	my ($unit) = @_;
-	printf "%d,%d %d° %d %d\n", @$unit;
+	my ($unit, $score) = @_;
+	$score = 0 if not defined $score;
+	printf "%d,%d %d° %d %d %d\n", @$unit, $score;
 }
 
 ########################
